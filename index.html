@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Class Timer</title>
+<!--
+  Class countdown timer, opened by the START TIMER button on Do Now slides.
+  Starts the moment it loads. URL options:
+    t = seconds (default 240)   l = label (default DO NOW)   c = accent hex, no # (default 0C447C)
+  Keys: Space pause/resume, R restart, F full screen. Click the time to pause.
+  Source lives in 16 Teach Week Kit/timer/; build_deck.py writes the links.
+-->
+<style>
+  :root { --accent: #0C447C; --paper: #FDFBF6; --ink: #212121; --faint: #9B9890; --track: #E9E4D9; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--paper); color: var(--ink);
+    font-family: Arial, Helvetica, sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 3vh; padding: 4vh 6vw; overflow: hidden; user-select: none;
+  }
+  #label { font-size: clamp(28px, 7vw, 96px); font-weight: 700; color: var(--accent); letter-spacing: .04em; }
+  #time {
+    font-size: min(34vw, 52vh); font-weight: 700; line-height: 1; color: var(--accent);
+    font-variant-numeric: tabular-nums; cursor: pointer;
+  }
+  #bar { width: min(90vw, 1400px); height: clamp(14px, 3vh, 32px); background: var(--track); border-radius: 999px; overflow: hidden; }
+  #fill { height: 100%; width: 100%; background: var(--accent); border-radius: 999px; }
+  #hint { position: fixed; bottom: 2vh; font-size: clamp(12px, 1.4vw, 18px); color: var(--faint); }
+  body.paused #time { opacity: .45; }
+  body.done #time { font-size: min(14vw, 34vh); white-space: nowrap; }
+  body.done #bar { visibility: hidden; }
+  body.done.flash { background: var(--accent); }
+  body.done.flash #label, body.done.flash #time { color: var(--paper); }
+</style>
+</head>
+<body>
+  <div id="label">DO NOW</div>
+  <div id="time" title="Click to pause">4:00</div>
+  <div id="bar"><div id="fill"></div></div>
+  <div id="hint">Space pause &middot; R restart &middot; F full screen &middot; close this tab to go back to the slides</div>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var total = Math.max(1, Math.min(3600, parseInt(q.get("t"), 10) || 240));
+  var label = (q.get("l") || "DO NOW").slice(0, 30);
+  var c = (q.get("c") || "").replace(/[^0-9a-fA-F]/g, "");
+  if (c.length === 6) document.documentElement.style.setProperty("--accent", "#" + c);
+
+  var elLabel = document.getElementById("label");
+  var elTime = document.getElementById("time");
+  var elFill = document.getElementById("fill");
+  elLabel.textContent = label;
+
+  // Wall-clock based so a background tab or a slow laptop never drifts.
+  var endAt, pausedLeft = null, done = false, audio = null;
+
+  function fmt(s) { var m = Math.floor(s / 60), r = s % 60; return m + ":" + (r < 10 ? "0" : "") + r; }
+
+  function chime() {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === "suspended") audio.resume();
+      [0, 0.35, 0.7].forEach(function (d) {
+        var o = audio.createOscillator(), g = audio.createGain(), t0 = audio.currentTime + d;
+        o.type = "sine"; o.frequency.value = 880;
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.3);
+        o.connect(g).connect(audio.destination); o.start(t0); o.stop(t0 + 0.32);
+      });
+    } catch (e) { /* no sound, the screen still flashes */ }
+  }
+
+  function finish() {
+    done = true;
+    document.body.classList.add("done");
+    elTime.textContent = "TIME'S UP";
+    document.title = "TIME'S UP";
+    chime();
+    var n = 0, f = setInterval(function () {
+      document.body.classList.toggle("flash");
+      if (++n >= 6) { clearInterval(f); document.body.classList.add("flash"); }
+    }, 400);
+  }
+
+  function tick() {
+    if (done) return;
+    var leftMs = pausedLeft !== null ? pausedLeft : endAt - Date.now();
+    var left = Math.max(0, Math.ceil(leftMs / 1000));
+    elTime.textContent = fmt(left);
+    document.title = fmt(left) + " " + label;
+    elFill.style.width = (100 * Math.max(0, leftMs) / (total * 1000)) + "%";
+    if (leftMs <= 0) finish();
+  }
+
+  function start() {
+    done = false; pausedLeft = null;
+    document.body.className = "";
+    endAt = Date.now() + total * 1000;
+    tick();
+  }
+
+  function togglePause() {
+    if (done) return;
+    if (pausedLeft === null) { pausedLeft = endAt - Date.now(); document.body.classList.add("paused"); }
+    else { endAt = Date.now() + pausedLeft; pausedLeft = null; document.body.classList.remove("paused"); }
+    tick();
+  }
+
+  function unlockSound() {   // browsers only allow sound after a click or key press
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === "suspended") audio.resume();
+    } catch (e) {}
+  }
+
+  document.addEventListener("keydown", function (e) {
+    unlockSound();
+    if (e.code === "Space") { e.preventDefault(); togglePause(); }
+    else if (e.key === "r" || e.key === "R") start();
+    else if (e.key === "f" || e.key === "F") {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen().catch(function () {});
+    }
+  });
+  document.addEventListener("pointerdown", unlockSound);
+  elTime.addEventListener("click", togglePause);
+
+  start();
+  setInterval(tick, 200);
+})();
+</script>
+</body>
+</html>
